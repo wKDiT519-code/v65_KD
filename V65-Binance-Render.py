@@ -1,10 +1,3 @@
-"""
-V65_binance - Render.com FREE VERSION
-- Flask health check on port 10000 (Render requirement)
-- Background bot loop every 1 hour
-- Highlight colors + Funding + NFP protection
-"""
-
 import ccxt
 import pandas as pd
 import pandas_ta as ta
@@ -23,7 +16,6 @@ RSI_PERIOD, BB_PERIOD, BB_STD, ATR_PERIOD = 14, 20, 2.0, 14
 MAX_SL_PCT, MIN_SL_PCT = 0.06, 0.008
 THAI_TZ = pytz.timezone('Asia/Bangkok')
 TRADE_MODE = "SPOT"
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
@@ -31,7 +23,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def health():
-    return f"V65 Binance Bot Running - {datetime.now(THAI_TZ).strftime('%d/%m/%Y %H:%M')} - PAXG/USDT 1H - Telegram: {'SET' if TELEGRAM_BOT_TOKEN else 'NOT SET'}", 200
+    return f"V65 Binance Bot Running OK - {datetime.now(THAI_TZ).strftime('%d/%m/%Y %H:%M')} - PAXG/USDT 1H", 200
 
 @app.route("/check")
 def manual_check():
@@ -49,10 +41,9 @@ def send_telegram_auto(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
         r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
-        print(f"Telegram sent: {r.status_code}")
         return r.status_code == 200
     except Exception as e:
-        print(f"Telegram error: {e}")
+        print(f"Error: {e}")
         return False
 
 def thai_time_now():
@@ -66,25 +57,13 @@ def tg_message(state, price, info, balance=None, pnl=None, boll_info=""):
     return base
 
 def highlight_buy():
-    return """🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
-🟢🟢 <b>➡ SPOT ซื้อจ้า</b> 🟢🟢
-🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"""
-
+    return "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🟢🟢 <b>➡ SPOT ซื้อจ้า</b> 🟢🟢\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
 def highlight_sell():
-    return """🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
-🔴🔴 <b>➡ SPOT ขายจ้า</b> 🔴🔴
-🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"""
-
+    return "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n🔴🔴 <b>➡ SPOT ขายจ้า</b> 🔴🔴\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
 def highlight_hold():
-    return """🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦
-💎💎 <b>✊ ถือไว้/รอก่อน</b> 💎💎
-🟨🟨 <b>⏳ รอสัญญาณชัดๆ</b> 🟨🟨
-🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"""
-
+    return "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n💎💎 <b>✊ ถือไว้/รอก่อน</b> 💎💎\n🟨🟨 <b>⏳ รอสัญญาณชัดๆ</b> 🟨🟨\n🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"
 def highlight_wait():
-    return """🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨
-⏳⏳ <b>รอก่อน... ยังไม่เข้าเกณฑ์</b> ⏳⏳
-🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨"""
+    return "🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨\n⏳⏳ <b>รอก่อน... ยังไม่เข้าเกณฑ์</b> ⏳⏳\n🟨🟨🟨🟨🟨🟨🟨🟨🟨🟨"
 
 def is_news_time():
     from datetime import timedelta
@@ -94,35 +73,25 @@ def is_news_time():
     first_friday = first_day + timedelta(days=days_ahead)
     if now.day == first_friday.day and now.weekday() == 4:
         if 18 <= now.hour <= 21:
-            if now.hour == 18 and now.minute >= 30: return True, f"NFP วันนี้ {now.strftime('%d/%m')} 19:30 น. (กระชาก 50-100$)"
-            if now.hour in [19, 20]: return True, f"NFP วันนี้ {now.strftime('%d/%m')} 19:30 น. (กระชาก 50-100$)"
-            if now.hour == 21 and now.minute <= 30: return True, f"NFP วันนี้ {now.strftime('%d/%m')} 19:30 น. (กระชาก 50-100$)"
+            if now.hour == 18 and now.minute >= 30: return True, f"NFP วันนี้ {now.strftime('%d/%m')} 19:30 น."
+            if now.hour in [19,20]: return True, f"NFP วันนี้ {now.strftime('%d/%m')} 19:30 น."
+            if now.hour == 21 and now.minute <= 30: return True, f"NFP วันนี้ {now.strftime('%d/%m')} 19:30 น."
     return False, ""
-
 def is_funding_time():
     now = datetime.now(THAI_TZ)
-    if TRADE_MODE == "SPOT": return False, "SPOT ไม่โดน Funding ปลอดภัย 100%"
-    funding_hours = [7, 15, 23]
-    for fh in funding_hours:
-        if now.hour == fh and now.minute <= 10: return True, f"Funding Time {fh}:00 น."
+    if TRADE_MODE == "SPOT": return False, ""
     return False, ""
-
 def is_high_volatility(df):
     if df is None or len(df) < 30: return False, ""
     atr = df['ATR'].iloc[-1]
     atr_avg = df['ATR'].tail(20).mean()
-    if atr > atr_avg * 2.5: return True, f"ทองกระชาก ATR {atr:.2f} > ปกติ {atr_avg:.2f} x2.5"
-    last = df.iloc[-1]
-    candle_range = last['high'] - last['low']
-    if candle_range > atr * 2.2: return True, f"แท่งกระชาก {candle_range:.2f}$ > ATR*2.2"
+    if atr > atr_avg * 2.5: return True, f"ทองกระชาก ATR {atr:.2f}"
     return False, ""
-
 def check_divergence(df):
     recent = df.tail(20)
     bullish_div = recent['close'].iloc[-1] < recent['close'].iloc[-10] and recent['RSI'].iloc[-1] > recent['RSI'].iloc[-10]
     bearish_div = recent['close'].iloc[-1] > recent['close'].iloc[-10] and recent['RSI'].iloc[-1] < recent['RSI'].iloc[-10]
     return bullish_div, bearish_div
-
 def calc_sl_dynamic(price, df, side="LONG"):
     atr = df['ATR'].iloc[-1]
     ema200 = df[f'EMA_{EMA_TREND}'].iloc[-1]
@@ -137,7 +106,7 @@ def calc_sl_dynamic(price, df, side="LONG"):
         sl = max(candidates) if candidates else sl_atr
         sl = max(sl, price * (1-MAX_SL_PCT))
         sl = min(sl, price * (1-MIN_SL_PCT))
-        return sl, atr, f"ATR {atr:.2f}"
+        return sl, atr, ""
     else:
         sl_atr = price + (atr * 1.8)
         sl_swing = recent_high + (atr * 0.3)
@@ -147,19 +116,19 @@ def calc_sl_dynamic(price, df, side="LONG"):
         sl = min(candidates) if candidates else sl_atr
         sl = min(sl, price * (1+MAX_SL_PCT))
         sl = max(sl, price * (1+MIN_SL_PCT))
-        return sl, atr, f"ATR {atr:.2f}"
+        return sl, atr, ""
 
 def analyze(df, balance=1000, mode=TRADE_MODE):
     last = df.iloc[-1]
     price, ema12, ema26, ema200 = last['close'], last[f'EMA_{EMA_FAST}'], last[f'EMA_{EMA_SLOW}'], last[f'EMA_{EMA_TREND}']
     macd_dif, macd_dea, rsi, boll, ub, lb, atr = last['MACD'], last['MACD_S'], last['RSI'], last['BOLL'], last['UB'], last['LB'], last['ATR']
     bullish_div, bearish_div = check_divergence(df)
-    funding, funding_msg = is_funding_time()
-    if funding: return tg_message("💸 งดถือข้าม Funding", price, f"{funding_msg}", boll_info=f"BOLL {boll:.2f}")
+    funding, _ = is_funding_time()
+    if funding: return tg_message("💸 Funding", price, "งดถือข้าม", boll_info=f"BOLL {boll:.2f}")
     news, news_name = is_news_time()
     if news: return tg_message("🔒 ปิดระบบข่าว NFP", price, f"มีข่าว {news_name}", boll_info=f"BOLL {boll:.2f}")
     vol, vol_msg = is_high_volatility(df)
-    if vol: return tg_message("⚠️ ทองกระชาก", price, f"{vol_msg}", boll_info=f"BOLL {boll:.2f}")
+    if vol: return tg_message("⚠️ ทองกระชาก", price, vol_msg, boll_info=f"BOLL {boll:.2f}")
     ema_cross_up = ema12 > ema26 and df[f'EMA_{EMA_FAST}'].iloc[-2] <= df[f'EMA_{EMA_SLOW}'].iloc[-2]
     macd_cross_up = macd_dif > macd_dea and df['MACD'].iloc[-2] <= df['MACD_S'].iloc[-2]
     above_ema200 = price > ema200
@@ -173,10 +142,8 @@ def analyze(df, balance=1000, mode=TRADE_MODE):
     boll_info = f"BOLL {boll:.2f} UB {ub:.2f} LB {lb:.2f} EMA200 {ema200:.1f} ATR {atr:.2f}"
     if mode == "SPOT":
         if long_score >= 3:
-            sl, atr_v, detail = calc_sl_dynamic(price, df, "LONG")
             return tg_message("🟢 SPOT ซื้อจ้า", price, highlight_buy(), balance, "ซื้อสะสม", boll_info)
         if short_score >= 3:
-            sl, atr_v, detail = calc_sl_dynamic(price, df, "SHORT")
             return tg_message("🔴 SPOT ขายจ้า", price, highlight_sell(), balance, "ขายทำกำไร", boll_info)
         hold_info = highlight_hold() + f"\nLong {long_score}/4 Short {short_score}/4 RSI {rsi:.1f} ATR {atr:.2f}"
         return tg_message("💎 ถือไว้/รอก่อน", price, hold_info, balance, "รอ", boll_info)
@@ -206,19 +173,15 @@ def run_hourly_check(balance=1000):
     return msg
 
 def bot_loop():
-    print("🚀 V65 Binance Bot Loop Started - PAXG/USDT 1H")
+    print("🚀 V65 Bot Loop Started")
     while True:
         try:
             print(run_hourly_check())
         except Exception as e:
             print(f"Loop error: {e}")
-        print(f"💤 Sleep 1 hour... Next {(datetime.now(THAI_TZ) + pd.Timedelta(hours=1)).strftime('%H:%M')}")
         time.sleep(3600)
 
 if __name__ == "__main__":
-    # Start bot loop in background thread
-    thread = threading.Thread(target=bot_loop, daemon=True)
-    thread.start()
-    # Start Flask web server (Render free requires port 10000)
+    threading.Thread(target=bot_loop, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
