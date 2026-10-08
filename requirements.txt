@@ -1,6 +1,1 @@
 Flask==2.3.3
-ccxt
-pandas
-pandas-ta
-pytz
-requests
