@@ -1,8 +1,6 @@
-ccxt==4.2.25
-pandas==2.2.2
-pandas-ta==0.3.14b0
+Flask==2.3.3
+ccxt
+pandas
+pandas-ta
 pytz
 requests
-python-dotenv
-Flask==2.3.3
-gunicorn==21.2.0
