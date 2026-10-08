@@ -3,4 +3,3 @@ pytz
 requests
 ccxt
 pandas
-pandas-ta
