@@ -84,23 +84,23 @@ def detect_divergence(price_series, indicator_series, lookback=30):
 @app.route("/")
 def home():
     t = thai_now()
-    return f"<h1>V72 NO BB - EMA+ATR ✅</h1><p>{t}</p><p>ตัด BB ออกแล้ว ใช้ EMA+ATR อย่างเดียว</p><p><a href='/force-send'>/force-send</a></p>", 200
+    return f"<h1>V73 FIXED RANGE ✅</h1><p>{t}</p><p>แก้บั๊กช่วงขายสลับกัน</p><p><a href='/force-send'>/force-send</a></p>", 200
 
 @app.route("/ping")
 def ping():
-    return f"PONG {thai_now()} - V72 NO BB", 200
+    return f"PONG {thai_now()} - V73", 200
 
 @app.route("/force-send")
 @app.route("/check")
 def check():
     try:
-        msg = run_v72_once()
+        msg = run_v73_once()
         return f"<h1>OK ส่งแล้ว</h1><pre>{msg}</pre>", 200
     except Exception as e:
         import traceback
         return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
 
-def run_v72_once():
+def run_v73_once():
     import ccxt
     import pandas as pd
     exchanges_to_try = ['okx', 'bybit', 'coinbase', 'kucoin', 'gateio', 'bitget']
@@ -151,23 +151,16 @@ def run_v72_once():
     t = thai_now()
     trend = "ขาขึ้น" if price > ema200 else "ขาลง"
 
-    # ช่วงราคาแบบไม่ใช้ BB - ใช้ EMA + ATR อย่างเดียว
-    # ซื้อถูก = ใกล้ EMA12 หรือ EMA200 ลบ ATR
-    # ขายแพง = ใกล้ EMA12 บวก ATR
-
+    # FIXED RANGE LOGIC - ไม่มีสลับ
     if long_score >= 4:
-        # ซื้อ - ต้องซื้อถูกกว่าหรือเท่าราคาปัจจุบัน
-        buy_low = ema200 - atr_v  # แนวรับลึก
-        if buy_low > price:
-            buy_low = price - atr_v * 1.5
+        buy_low = min(ema200 - atr_v*0.5, price - atr_v)
         buy_high = price
-        buy_ideal = ema12 if ema12 < price and ema12 > ema200 else price * 0.998
-
-        sell_target = price + atr_v * 2  # เป้าขายสูงกว่า
+        buy_ideal = min(ema12, price*0.998) if ema12 < price else price*0.998
+        sell_target = price + atr_v*2
 
         title = "🟢 ซื้อ"
         msg = (
-            f"V72 [{SYMBOL}] {title}\n"
+            f"V73 [{SYMBOL}] {title}\n"
             f"📅 {t}\n"
             f"💰 ตอนนี้ ${price:.2f} | {used_ex} | RSI {rsi_v:.0f}\n"
             f"\n"
@@ -179,16 +172,14 @@ def run_v72_once():
             f"--------------------------------"
         )
     elif short_score >= 4:
-        # ขาย - ต้องขายแพงกว่าหรือเท่าราคาปัจจุบัน
         sell_low = price
-        sell_high = price + atr_v * 1.5
+        sell_high = price + atr_v*1.5
         sell_ideal = price
-
         buy_back = ema200
 
         title = "🔴 ขาย"
         msg = (
-            f"V72 [{SYMBOL}] {title}\n"
+            f"V73 [{SYMBOL}] {title}\n"
             f"📅 {t}\n"
             f"💰 ตอนนี้ ${price:.2f} | {used_ex} | RSI {rsi_v:.0f}\n"
             f"\n"
@@ -200,31 +191,33 @@ def run_v72_once():
             f"--------------------------------"
         )
     else:
-        # ถือไว้
-        buy_low = ema200 - atr_v * 0.5
-        buy_high = ema12
-        if buy_high > price:
-            buy_high = price * 0.995
+        # ถือไว้ - FIXED ไม่ให้สลับ
+        buy_low = ema200 - atr_v*0.5
+        buy_high = min(ema12, price*0.995)
+        if buy_low > buy_high:
+            buy_low, buy_high = buy_high, buy_low
+        # ให้ buy ต่ำกว่าราคาปัจจุบันเสมอ
+        buy_high = min(buy_high, price*0.995)
+        buy_low = min(buy_low, buy_high - 1)
 
-        sell_low = price * 1.005
-        sell_high = ema12 + atr_v * 1.5
-        if sell_low < price:
-            sell_low = price * 1.005
+        sell_low = max(price*1.005, ema12)
+        sell_high = sell_low + atr_v*1.5
+        # ให้ขายสูงกว่าราคาปัจจุบันเสมอ
 
         trend_msg = f"ยัง {trend} ถ้ามีของถือต่อ" if price > ema200 else "รอดูก่อน"
 
         title = "💎 ถือไว้"
         msg = (
-            f"V72 [{SYMBOL}] {title}\n"
+            f"V73 [{SYMBOL}] {title}\n"
             f"📅 {t}\n"
             f"💰 ตอนนี้ ${price:.2f} | {used_ex} | RSI {rsi_v:.0f}\n"
             f"\n"
             f"{trend_msg}\n"
             f"\n"
-            f"🎯 ถ้าจะซื้อ รอ\n"
+            f"🎯 ถ้าจะซื้อ รอถูกกว่านี้\n"
             f"${buy_low:.2f} - ${buy_high:.2f} (EMA200-EMA12)\n"
             f"\n"
-            f"🎯 ถ้าจะขาย รอ\n"
+            f"🎯 ถ้าจะขาย รอแพงกว่านี้\n"
             f"${sell_low:.2f} - ${sell_high:.2f}\n"
             f"--------------------------------"
         )
@@ -236,7 +229,7 @@ def bot_loop():
     time.sleep(10)
     while True:
         try:
-            run_v72_once()
+            run_v73_once()
         except:
             pass
         time.sleep(3600)
