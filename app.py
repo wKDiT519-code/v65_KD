@@ -2,7 +2,7 @@
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from flask import Flask
 import requests
@@ -29,16 +29,14 @@ def send_telegram(msg):
             r = requests.post(url, json=payload, timeout=15)
             if r.status_code == 200:
                 ok_any = True
-        except:
-            pass
+        except Exception as e:
+            print(f"Telegram error: {e}")
     return ok_any, ""
 
 def thai_now():
-    # FIX: ใช้ utc เป็นฐานแล้วแปลงเป็นไทย จะเป๊ะกว่า datetime.now(THAI_TZ) บน Render
     return datetime.now(UTC_TZ).astimezone(THAI_TZ).strftime("%d/%m/%Y %H:%M:%S น. เวลาไทย")
 
 def thai_from_ts(ts_ms):
-    # แปลง timestamp ของแท่งเทียนเป็นเวลาไทย
     try:
         dt_utc = datetime.fromtimestamp(ts_ms/1000, tz=UTC_TZ)
         return dt_utc.astimezone(THAI_TZ).strftime("%d/%m %H:%M")
@@ -94,28 +92,38 @@ def detect_divergence(price_series, indicator_series, lookback=30):
 @app.route("/")
 def home():
     t = thai_now()
-    return f"<h1>V75 TIME FIXED ✅</h1><p>{t}</p><p>แก้เวลาให้ตรงเวลาไทยเป๊ะ + โชว์เวลาแท่งเทียน</p><p><a href='/force-send'>/force-send</a></p>", 200
+    return f"<h1>V76 ON-TIME FIXED ✅</h1><p>{t}</p><p>ส่งตรงทุกชั่วโมง นาทีที่ 02 - แก้แท่ง 19:00 ไม่ส่ง</p><p><a href='/force-send'>/force-send</a> | <a href='/status'>/status</a></p>", 200
 
 @app.route("/ping")
 def ping():
-    return f"PONG {thai_now()} - V75", 200
+    return f"PONG {thai_now()} - V76", 200
+
+@app.route("/status")
+def status():
+    now = datetime.now(UTC_TZ).astimezone(THAI_TZ)
+    next_run = now.replace(minute=2, second=0, microsecond=0)
+    if now.minute >= 2:
+        next_run = next_run + timedelta(hours=1)
+    wait = (next_run - now).total_seconds()
+    return f"Now: {thai_now()}<br>Next run: {next_run.strftime('%d/%m/%Y %H:%M:%S')}<br>Wait: {wait:.0f}s<br>V76 ON-TIME", 200
 
 @app.route("/force-send")
 @app.route("/check")
 def check():
     try:
-        msg = run_v75_once()
-        return f"<h1>OK ส่งแล้ว</h1><pre>{msg}</pre>", 200
+        msg = run_v76_once()
+        return f"<h1>OK ส่งแล้ว V76</h1><pre>{msg}</pre>", 200
     except Exception as e:
         import traceback
         return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
 
-def run_v75_once():
+def run_v76_once():
     import ccxt
     import pandas as pd
     exchanges_to_try = ['okx', 'bybit', 'coinbase', 'kucoin', 'gateio', 'bitget']
     ohlcv = None
     used_ex = None
+    last_error = ""
     for ex_id in exchanges_to_try:
         try:
             ex_class = getattr(ccxt, ex_id)
@@ -124,10 +132,11 @@ def run_v75_once():
             if ohlcv and len(ohlcv) > 100:
                 used_ex = ex_id.upper()
                 break
-        except:
+        except Exception as e:
+            last_error = str(e)
             continue
     if ohlcv is None:
-        raise Exception("ดึงกราฟไม่ได้")
+        raise Exception(f"ดึงกราฟไม่ได้: {last_error}")
 
     df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','vol'])
     df['EMA_12'] = ema(df['close'], 12)
@@ -169,10 +178,9 @@ def run_v75_once():
         buy_ideal = min(ema12, price*0.998) if ema12 < price else price*0.998
         sell_target = price + atr_v*2
         upside_pct = (sell_target - price) / price * 100
-
         title = "🟢 ซื้อ"
         msg = (
-            f"V75 [{SYMBOL}] {title}\n"
+            f"V76 [{SYMBOL}] {title}\n"
             f"📅 ส่ง {t_now}\n"
             f"🕐 แท่ง {t_candle} | {used_ex}\n"
             f"💰 ตอนนี้ ${price:.2f} | RSI {rsi_v:.0f}\n"
@@ -187,20 +195,17 @@ def run_v75_once():
     elif short_score >= 4:
         sell_low = price
         sell_high = price + atr_v*1.5
-        sell_ideal = price
         buy_back = ema200
         downside_pct = (price - buy_back) / price * 100
-
         title = "🔴 ขาย"
         msg = (
-            f"V75 [{SYMBOL}] {title}\n"
+            f"V76 [{SYMBOL}] {title}\n"
             f"📅 ส่ง {t_now}\n"
             f"🕐 แท่ง {t_candle} | {used_ex}\n"
             f"💰 ตอนนี้ ${price:.2f} | RSI {rsi_v:.0f}\n"
             f"\n"
             f"🎯 ควรขายที่\n"
             f"${sell_low:.2f} - ${sell_high:.2f}\n"
-            f"เป้าขาย ${sell_ideal:.2f} ตอนนี้เลย\n"
             f"\n"
             f"📉 รอย่อซื้อใหม่ ${buy_back:.2f} (-{downside_pct:.2f}%)\n"
             f"--------------------------------"
@@ -212,25 +217,20 @@ def run_v75_once():
             buy_low, buy_high = buy_high, buy_low
         buy_high = min(buy_high, price*0.995)
         buy_low = min(buy_low, buy_high - 1)
-
         sell_low = max(price*1.005, ema12)
         sell_high = sell_low + atr_v*1.5
-
         dist_to_buy = (price - buy_high) / price * 100
         dist_to_sell = (sell_low - price) / price * 100
-        
         trend_msg = f"ยัง {trend} ถ้ามีของถือต่อ" if price > ema200 else "รอดูก่อน"
-
         if dist_to_sell > dist_to_buy * 1.5:
             insight = f"💡 ไปขาย +{dist_to_sell:.2f}% ไกลกว่า ลงไปซื้อ -{dist_to_buy:.2f}%\n   → ยังมี Upside น่าถือ/ซื้อได้"
         elif dist_to_buy > dist_to_sell * 1.5:
             insight = f"💡 ลงไปซื้อ -{dist_to_buy:.2f}% ไกลกว่า ไปขาย +{dist_to_sell:.2f}%\n   → ใกล้แนวขายแล้ว ระวัง"
         else:
             insight = f"💡 ระยะพอๆกัน ซื้อ -{dist_to_buy:.2f}% / ขาย +{dist_to_sell:.2f}%"
-
         title = "💎 ถือไว้"
         msg = (
-            f"V75 [{SYMBOL}] {title}\n"
+            f"V76 [{SYMBOL}] {title}\n"
             f"📅 ส่ง {t_now}\n"
             f"🕐 แท่ง {t_candle} | {used_ex}\n"
             f"💰 ตอนนี้ ${price:.2f} | RSI {rsi_v:.0f}\n"
@@ -246,27 +246,57 @@ def run_v75_once():
             f"{insight}\n"
             f"--------------------------------"
         )
-
     send_telegram(msg)
+    print(f"[{t_now}] Sent: {title} {price}")
     return msg
 
 def bot_loop():
+    print("V76 bot_loop started - ON TIME scheduler")
     time.sleep(10)
+    # ส่งครั้งแรกตอนบูตเลย
+    try:
+        run_v76_once()
+    except Exception as e:
+        print(f"First run failed: {e}")
+    
     while True:
         try:
-            run_v75_once()
-        except:
-            pass
-        time.sleep(3600)
+            now = datetime.now(UTC_TZ).astimezone(THAI_TZ)
+            # คำนวณรอบถัดไป: นาทีที่ 02 ของชั่วโมงถัดไป
+            next_run = now.replace(minute=2, second=0, microsecond=0)
+            if now.minute >= 2:
+                next_run = next_run + timedelta(hours=1)
+            wait_seconds = (next_run - now).total_seconds()
+            if wait_seconds < 0:
+                wait_seconds += 3600
+            if wait_seconds > 3600:
+                wait_seconds = 3600
+            
+            print(f"[{thai_now()}] Next run at {next_run.strftime('%H:%M:%S')} in {wait_seconds:.0f}s")
+            # นอนแบบสั้นๆ เพื่อไม่ให้ Render คิดว่า idle เกินไป
+            while wait_seconds > 0:
+                sleep_chunk = min(wait_seconds, 60)
+                time.sleep(sleep_chunk)
+                wait_seconds -= sleep_chunk
+            
+            print(f"[{thai_now()}] Running scheduled task...")
+            run_v76_once()
+        except Exception as e:
+            print(f"bot_loop error: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(60)
 
 def keep_alive_loop():
     time.sleep(20)
     while True:
         try:
-            requests.get(BASE_URL, timeout=10)
-        except:
-            pass
-        time.sleep(600)
+            if BASE_URL:
+                r = requests.get(BASE_URL, timeout=10)
+                print(f"Keep-alive ping: {r.status_code}")
+        except Exception as e:
+            print(f"Keep-alive failed: {e}")
+        time.sleep(300)  # ทุก 5 นาที กันหลับ
 
 threading.Thread(target=bot_loop, daemon=True).start()
 threading.Thread(target=keep_alive_loop, daemon=True).start()
