@@ -1,3 +1,4 @@
+
 import os
 import threading
 import time
@@ -73,7 +74,7 @@ def home():
     <h1>V65 Binance Bot LIVE ✅</h1>
     <p>PAXG/USDT 1H - {t}</p>
     <p>TOKEN: {token_ok} | CHAT_ID: {chat_ok} ({TELEGRAM_CHAT_ID[:20]}...)</p>
-    <p><a href="/ping">/ping</a> | <a href="/test-telegram">/test-telegram - ทดสอบส่ง Telegram</a> | <a href="/check">/check - เช็คกราฟสด</a> | <a href="/force-send">/force-send - บังคับส่งตอนนี้</a></p>
+    <p><a href="/ping">/ping</a> | <a href="/test-telegram">/test-telegram</a> | <a href="/check">/check</a> | <a href="/force-send">/force-send</a></p>
     <p>Bot Loop: ทุก 60 นาที | Keep-Alive: ทุก 10 นาที</p>
     """, 200
 
@@ -89,7 +90,7 @@ def test_telegram():
     if ok:
         return f"<h1>✅ ส่ง Telegram แล้ว</h1><p>{msg}</p><p>Resp: {resp[:500]}</p>", 200
     else:
-        return f"<h1>❌ ส่งไม่สำเร็จ</h1><p>Error: {resp}</p><p>เช็ค TOKEN/CHAT_ID ใน Render Environment</p>", 500
+        return f"<h1>❌ ส่งไม่สำเร็จ</h1><p>Error: {resp}</p>", 500
 
 @app.route("/force-send")
 @app.route("/check")
@@ -104,31 +105,25 @@ def check():
 def run_v65_once():
     import ccxt
     import pandas as pd
-
-    # Binance โดนบล็อค 451 ที่ Render US -> ใช้หลาย Exchange แบบ fallback
     exchanges_to_try = ['okx', 'bybit', 'coinbase', 'kucoin', 'gateio', 'bitget']
     ohlcv = None
     used_ex = None
     last_error = None
-
     for ex_id in exchanges_to_try:
         try:
             ex_class = getattr(ccxt, ex_id)
             ex = ex_class({'enableRateLimit': True})
-            # บาง exchange ใช้ชื่อคู่ต่างกัน ลอง PAXG/USDT ก่อน
             ohlcv = ex.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=300)
             if ohlcv and len(ohlcv) > 100:
                 used_ex = ex_id
-                print(f"✅ ใช้ {ex_id} ดึงกราฟ PAXG/USDT สำเร็จ")
+                print(f"✅ ใช้ {ex_id} สำเร็จ")
                 break
         except Exception as e:
             print(f"❌ {ex_id} ล้มเหลว: {e}")
             last_error = e
             continue
-
     if ohlcv is None:
         raise Exception(f"ดึงกราฟไม่ได้จากทุก Exchange: {last_error}")
-
     df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','vol'])
     df['EMA_12'] = ema(df['close'], 12)
     df['EMA_26'] = ema(df['close'], 26)
@@ -153,38 +148,19 @@ def run_v65_once():
     long_score = sum([ema_cross_up, macd_cross_up, above_200, rsi_v > 45])
     short_score = sum([ema_cross_down, macd_cross_down, below_200, rsi_v < 55])
     boll_info = f"BOLL {boll:.2f} UB {ub:.2f} LB {lb:.2f} EMA200 {ema200:.1f} ATR {atr_v:.2f} [{used_ex}]"
-    def h_buy(): return "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
-🟢🟢 ➡ SPOT ซื้อจ้า 🟢🟢
-🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
-    def h_sell(): return "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
-🔴🔴 ➡ SPOT ขายจ้า 🔴🔴
-🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
-    def h_hold(): return "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦
-💎💎 ✊ ถือไว้/รอก่อน 💎💎
-🟨🟨 ⏳ รอสัญญาณชัดๆ 🟨🟨
-🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"
+    def h_buy(): return "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🟢🟢 <b>➡ SPOT ซื้อจ้า</b> 🟢🟢\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
+    def h_sell(): return "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n🔴🔴 <b>➡ SPOT ขายจ้า</b> 🔴🔴\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
+    def h_hold(): return "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n💎💎 <b>✊ ถือไว้/รอก่อน</b> 💎💎\n🟨🟨 <b>⏳ รอสัญญาณชัดๆ</b> 🟨🟨\n🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"
     t = thai_now()
     if long_score >= 3:
-        info = h_buy() + f"
-Long {long_score}/4 RSI {rsi_v:.1f}"
-        msg = f"V65_binance [{SYMBOL}] 🟢 ซื้อจ้า
-📅 {t}
-${price:.2f} {boll_info}
-{info}"
+        info = h_buy() + f"\nLong {long_score}/4 RSI {rsi_v:.1f}"
+        msg = f"V65_binance [{SYMBOL}] 🟢 ซื้อจ้า\n📅 {t}\n${price:.2f} {boll_info}\n{info}"
     elif short_score >= 3:
-        info = h_sell() + f"
-Short {short_score}/4 RSI {rsi_v:.1f}"
-        msg = f"V65_binance [{SYMBOL}] 🔴 ขายจ้า
-📅 {t}
-${price:.2f} {boll_info}
-{info}"
+        info = h_sell() + f"\nShort {short_score}/4 RSI {rsi_v:.1f}"
+        msg = f"V65_binance [{SYMBOL}] 🔴 ขายจ้า\n📅 {t}\n${price:.2f} {boll_info}\n{info}"
     else:
-        info = h_hold() + f"
-Long {long_score}/4 Short {short_score}/4 RSI {rsi_v:.1f}"
-        msg = f"V65_binance [{SYMBOL}] 💎 รอก่อน
-📅 {t}
-${price:.2f} {boll_info}
-{info}"
+        info = h_hold() + f"\nLong {long_score}/4 Short {short_score}/4 RSI {rsi_v:.1f}"
+        msg = f"V65_binance [{SYMBOL}] 💎 รอก่อน\n📅 {t}\n${price:.2f} {boll_info}\n{info}"
     send_telegram(msg)
     return msg
 
