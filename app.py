@@ -26,9 +26,9 @@ def send_telegram(msg):
     last_resp = ""
     for cid in chat_ids:
         try:
-            payload = {"chat_id": cid, "text": msg, "parse_mode": "HTML"}
+            payload = {"chat_id": cid, "text": msg}
             r = requests.post(url, json=payload, timeout=15)
-            print(f"Telegram -> {cid}: {r.status_code} {r.text[:200]}")
+            print(f"Telegram -> {cid}: {r.status_code}")
             last_resp = r.text
             if r.status_code == 200:
                 ok_any = True
@@ -65,44 +65,101 @@ def atr(high, low, close, period=14):
     tr = tr1.combine(tr2, max).combine(tr3, max)
     return tr.rolling(period).mean()
 
+# === DIVERGENT DETECTION ===
+def detect_divergence(price_series, indicator_series, lookback=30):
+    """
+    ตรวจ Bullish/Bearish Divergence แบบง่าย
+    Bullish: ราคาทำ Low ต่ำลง แต่ Indicator ทำ Low สูงขึ้น
+    Bearish: ราคาทำ High สูงขึ้น แต่ Indicator ทำ High ต่ำลง
+    """
+    try:
+        import pandas as pd
+        # ใช้ 30 แท่งล่าสุด
+        recent_price = price_series[-lookback:]
+        recent_ind = indicator_series[-lookback:]
+
+        # หา Low 2 จุดล่าสุด
+        # แบ่งครึ่ง lookback หา low แต่ละครึ่ง
+        half = lookback // 2
+        first_half_price = recent_price[:half]
+        second_half_price = recent_price[half:]
+
+        first_low_price = first_half_price.min()
+        second_low_price = second_half_price.min()
+        first_low_idx = first_half_price.idxmin()
+        second_low_idx = second_half_price.idxmin()
+
+        first_high_price = first_half_price.max()
+        second_high_price = second_half_price.max()
+        first_high_idx = first_half_price.idxmax()
+        second_high_idx = second_half_price.idxmax()
+
+        # RSI / MACD ณ จุด low/high นั้นๆ
+        first_low_ind = indicator_series.loc[first_low_idx] if first_low_idx in indicator_series.index else recent_ind.iloc[0]
+        second_low_ind = indicator_series.loc[second_low_idx] if second_low_idx in indicator_series.index else recent_ind.iloc[-1]
+        first_high_ind = indicator_series.loc[first_high_idx] if first_high_idx in indicator_series.index else recent_ind.iloc[0]
+        second_high_ind = indicator_series.loc[second_high_idx] if second_high_idx in indicator_series.index else recent_ind.iloc[-1]
+
+        bullish_div = False
+        bearish_div = False
+
+        # Bullish: ราคาต่ำลง แต่ indicator สูงขึ้น (อย่างน้อย 2%)
+        if second_low_price < first_low_price * 0.999 and second_low_ind > first_low_ind:
+            bullish_div = True
+
+        # Bearish: ราคาสูงขึ้น แต่ indicator ต่ำลง
+        if second_high_price > first_high_price * 1.001 and second_high_ind < first_high_ind:
+            bearish_div = True
+
+        return bullish_div, bearish_div, {
+            'first_low_price': float(first_low_price),
+            'second_low_price': float(second_low_price),
+            'first_low_ind': float(first_low_ind),
+            'second_low_ind': float(second_low_ind),
+            'first_high_price': float(first_high_price),
+            'second_high_price': float(second_high_price),
+            'first_high_ind': float(first_high_ind),
+            'second_high_ind': float(second_high_ind),
+        }
+    except Exception as e:
+        print(f"Div detect error: {e}")
+        return False, False, {}
+
 @app.route("/")
 def home():
     t = thai_now()
-    token_ok = "SET ✅" if TELEGRAM_BOT_TOKEN else "NOT SET ❌"
-    chat_ok = "SET ✅" if TELEGRAM_CHAT_ID else "NOT SET ❌"
     return f"""
-    <h1>V65 Binance Bot LIVE ✅</h1>
+    <h1>V66 Bot LIVE - EMA+MACD+RSI+DIVERGENT ✅</h1>
     <p>PAXG/USDT 1H - {t}</p>
-    <p>TOKEN: {token_ok} | CHAT_ID: {chat_ok} ({TELEGRAM_CHAT_ID[:20]}...)</p>
-    <p><a href="/ping">/ping</a> | <a href="/test-telegram">/test-telegram</a> | <a href="/check">/check</a> | <a href="/force-send">/force-send</a></p>
-    <p>Bot Loop: ทุก 60 นาที | Keep-Alive: ทุก 10 นาที</p>
+    <p>กลยุทธ: EMA12/26 + MACD + EMA200 + RSI + RSI Div + MACD Div (6 ปัจจัย ต้องได้ 4/6)</p>
+    <p><a href="/ping">/ping</a> | <a href="/test-telegram">/test-telegram</a> | <a href="/force-send">/force-send</a></p>
     """, 200
 
 @app.route("/ping")
 def ping():
-    return f"PONG {thai_now()} - Bot Awake ✅", 200
+    return f"PONG {thai_now()} - V66 DIVERGENT Bot Awake", 200
 
 @app.route("/test-telegram")
 def test_telegram():
     t = thai_now()
-    msg = f"V65 TEST 🟢 Telegram OK\n📅 {t}\nBot LIVE ✅"
+    msg = f"V66 TEST ✅ EMA+MACD+RSI+Divergent\n{t}\nBot LIVE"
     ok, resp = send_telegram(msg)
     if ok:
-        return f"<h1>✅ ส่ง Telegram แล้ว</h1><p>{msg}</p><p>Resp: {resp[:500]}</p>", 200
+        return f"<h1>OK ส่งแล้ว</h1><pre>{msg}</pre>", 200
     else:
-        return f"<h1>❌ ส่งไม่สำเร็จ</h1><p>Error: {resp}</p>", 500
+        return f"<h1>FAIL</h1><p>{resp}</p>", 500
 
 @app.route("/force-send")
 @app.route("/check")
 def check():
     try:
-        msg = run_v65_once()
-        return f"<h1>✅ ส่งแล้ว</h1><pre>{msg}</pre>", 200
+        msg = run_v66_once()
+        return f"<h1>OK ส่งแล้ว</h1><pre>{msg}</pre>", 200
     except Exception as e:
         import traceback
         return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
 
-def run_v65_once():
+def run_v66_once():
     import ccxt
     import pandas as pd
     exchanges_to_try = ['okx', 'bybit', 'coinbase', 'kucoin', 'gateio', 'bitget']
@@ -115,23 +172,25 @@ def run_v65_once():
             ex = ex_class({'enableRateLimit': True})
             ohlcv = ex.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=300)
             if ohlcv and len(ohlcv) > 100:
-                used_ex = ex_id
-                print(f"✅ ใช้ {ex_id} สำเร็จ")
+                used_ex = ex_id.upper()
+                print(f"Use {ex_id} OK")
                 break
         except Exception as e:
-            print(f"❌ {ex_id} ล้มเหลว: {e}")
+            print(f"{ex_id} fail: {e}")
             last_error = e
             continue
     if ohlcv is None:
-        raise Exception(f"ดึงกราฟไม่ได้จากทุก Exchange: {last_error}")
+        raise Exception(f"ดึงกราฟไม่ได้: {last_error}")
+
     df = pd.DataFrame(ohlcv, columns=['ts','open','high','low','close','vol'])
     df['EMA_12'] = ema(df['close'], 12)
     df['EMA_26'] = ema(df['close'], 26)
     df['EMA_200'] = ema(df['close'], 200)
     df['RSI'] = rsi(df['close'], 14)
-    df['MACD'], df['MACD_S'], _ = macd(df['close'], 12, 26, 9)
+    df['MACD'], df['MACD_S'], df['MACD_H'] = macd(df['close'], 12, 26, 9)
     df['BOLL'], df['UB'], df['LB'] = bbands(df['close'], 20, 2.0)
     df['ATR'] = atr(df['high'], df['low'], df['close'], 14)
+
     last = df.iloc[-1]
     prev = df.iloc[-2]
     price = last['close']
@@ -139,38 +198,69 @@ def run_v65_once():
     rsi_v = last['RSI']
     macd_dif, macd_dea = last['MACD'], last['MACD_S']
     boll, ub, lb, atr_v = last['BOLL'], last['UB'], last['LB'], last['ATR']
+
     ema_cross_up = ema12 > ema26 and prev['EMA_12'] <= prev['EMA_26']
     ema_cross_down = ema12 < ema26 and prev['EMA_12'] >= prev['EMA_26']
     macd_cross_up = macd_dif > macd_dea and prev['MACD'] <= prev['MACD_S']
     macd_cross_down = macd_dif < macd_dea and prev['MACD'] >= prev['MACD_S']
     above_200 = price > ema200
     below_200 = price < ema200
-    long_score = sum([ema_cross_up, macd_cross_up, above_200, rsi_v > 45])
-    short_score = sum([ema_cross_down, macd_cross_down, below_200, rsi_v < 55])
-    boll_info = f"BOLL {boll:.2f} UB {ub:.2f} LB {lb:.2f} EMA200 {ema200:.1f} ATR {atr_v:.2f} [{used_ex}]"
-    def h_buy(): return "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🟢🟢 <b>➡ SPOT ซื้อจ้า</b> 🟢🟢\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
-    def h_sell(): return "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n🔴🔴 <b>➡ SPOT ขายจ้า</b> 🔴🔴\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
-    def h_hold(): return "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n💎💎 <b>✊ ถือไว้/รอก่อน</b> 💎💎\n🟨🟨 <b>⏳ รอสัญญาณชัดๆ</b> 🟨🟨\n🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"
+    rsi_long = rsi_v > 45
+    rsi_short = rsi_v < 55
+
+    # === DIVERGENT ===
+    bullish_rsi_div, bearish_rsi_div, rsi_div_info = detect_divergence(df['close'], df['RSI'], lookback=30)
+    bullish_macd_div, bearish_macd_div, macd_div_info = detect_divergence(df['close'], df['MACD'], lookback=30)
+
+    long_score = sum([ema_cross_up, macd_cross_up, above_200, rsi_long, bullish_rsi_div, bullish_macd_div])
+    short_score = sum([ema_cross_down, macd_cross_down, below_200, rsi_short, bearish_rsi_div, bearish_macd_div])
+
     t = thai_now()
-    if long_score >= 3:
-        info = h_buy() + f"\nLong {long_score}/4 RSI {rsi_v:.1f}"
-        msg = f"V65_binance [{SYMBOL}] 🟢 ซื้อจ้า\n📅 {t}\n${price:.2f} {boll_info}\n{info}"
-    elif short_score >= 3:
-        info = h_sell() + f"\nShort {short_score}/4 RSI {rsi_v:.1f}"
-        msg = f"V65_binance [{SYMBOL}] 🔴 ขายจ้า\n📅 {t}\n${price:.2f} {boll_info}\n{info}"
+
+    # สร้างรายละเอียด Divergent สำหรับแสดง
+    div_text = ""
+    if bullish_rsi_div:
+        div_text += "📈 RSI Bull Div ✅ "
+    if bearish_rsi_div:
+        div_text += "📉 RSI Bear Div ✅ "
+    if bullish_macd_div:
+        div_text += "📈 MACD Bull Div ✅ "
+    if bearish_macd_div:
+        div_text += "📉 MACD Bear Div ✅ "
+    if not div_text:
+        div_text = "Div: ไม่พบ"
+
+    # ตัดสินสัญญาณ ต้องได้ 4/6
+    if long_score >= 4:
+        status = "🟢 SPOT ซื้อจ้า V66"
+        detail = f"Long {long_score}/6 [EMA{'✅' if ema_cross_up else '❌'} MACD{'✅' if macd_cross_up else '❌'} EMA200{'✅' if above_200 else '❌'} RSI{'✅' if rsi_long else '❌'} Div{'✅' if bullish_rsi_div or bullish_macd_div else '❌'}]"
+    elif short_score >= 4:
+        status = "🔴 SPOT ขายจ้า V66"
+        detail = f"Short {short_score}/6 [EMA{'✅' if ema_cross_down else '❌'} MACD{'✅' if macd_cross_down else '❌'} EMA200{'✅' if below_200 else '❌'} RSI{'✅' if rsi_short else '❌'} Div{'✅' if bearish_rsi_div or bearish_macd_div else '❌'}]"
     else:
-        info = h_hold() + f"\nLong {long_score}/4 Short {short_score}/4 RSI {rsi_v:.1f}"
-        msg = f"V65_binance [{SYMBOL}] 💎 รอก่อน\n📅 {t}\n${price:.2f} {boll_info}\n{info}"
+        status = "💎 รอก่อน / ถือไว้ V66"
+        detail = f"Long {long_score}/6 Short {short_score}/6"
+
+    msg = (
+        f"V66 [{SYMBOL}] {status}\n"
+        f"📅 {t}\n"
+        f"💰 ราคา ${price:.2f} | {used_ex}\n"
+        f"📊 BOLL {boll:.2f} | UB {ub:.2f} | LB {lb:.2f}\n"
+        f"📈 EMA200 {ema200:.1f} | ATR {atr_v:.2f} | RSI {rsi_v:.1f}\n"
+        f"🔍 {detail}\n"
+        f"🌀 {div_text}\n"
+        f"--------------------------------"
+    )
+
     send_telegram(msg)
     return msg
 
 def bot_loop():
-    print("🚀 V65 Bot Loop Started")
+    print("🚀 V66 Divergent Bot Started")
     time.sleep(10)
     while True:
         try:
-            print(f"⏰ Loop {thai_now()}")
-            msg = run_v65_once()
+            msg = run_v66_once()
             print(msg)
         except Exception as e:
             print(f"Loop error: {e}")
@@ -179,12 +269,12 @@ def bot_loop():
         time.sleep(3600)
 
 def keep_alive_loop():
-    print("🛡️ Keep-Alive Started")
+    print("Keep-Alive Started")
     time.sleep(20)
     while True:
         try:
             r = requests.get(BASE_URL, timeout=10)
-            print(f"Keep-Alive / : {r.status_code} {thai_now()}")
+            print(f"Keep-Alive / : {r.status_code}")
             r2 = requests.get(f"{BASE_URL}/ping", timeout=10)
             print(f"Keep-Alive /ping: {r2.status_code}")
         except Exception as e:
