@@ -1,4 +1,3 @@
-
 import os
 import threading
 import time
@@ -18,17 +17,24 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 def send_telegram(msg):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print(msg)
+        print(f"Missing TOKEN/CHAT_ID: {msg}")
         return False, "TOKEN or CHAT ID missing"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}
-        r = requests.post(url, json=payload, timeout=15)
-        print(f"Telegram: {r.status_code}")
-        return r.status_code == 200, r.text
-    except Exception as e:
-        print(f"TG error: {e}")
-        return False, str(e)
+    chat_ids = [c.strip() for c in TELEGRAM_CHAT_ID.split(",") if c.strip()]
+    ok_any = False
+    last_resp = ""
+    for cid in chat_ids:
+        try:
+            payload = {"chat_id": cid, "text": msg, "parse_mode": "HTML"}
+            r = requests.post(url, json=payload, timeout=15)
+            print(f"Telegram -> {cid}: {r.status_code} {r.text[:200]}")
+            last_resp = r.text
+            if r.status_code == 200:
+                ok_any = True
+        except Exception as e:
+            print(f"TG error {cid}: {e}")
+            last_resp = str(e)
+    return ok_any, last_resp
 
 def thai_now():
     return datetime.now(THAI_TZ).strftime("%d/%m/%Y %H:%M น. เวลาไทย")
@@ -61,14 +67,14 @@ def atr(high, low, close, period=14):
 @app.route("/")
 def home():
     t = thai_now()
-    token_set = "SET ✅" if TELEGRAM_BOT_TOKEN else "NOT SET ❌"
-    chat_set = "SET ✅" if TELEGRAM_CHAT_ID else "NOT SET ❌"
+    token_ok = "SET ✅" if TELEGRAM_BOT_TOKEN else "NOT SET ❌"
+    chat_ok = "SET ✅" if TELEGRAM_CHAT_ID else "NOT SET ❌"
     return f"""
-    <h1>V65 Binance Bot LIVE ✅ กันหลับแล้ว</h1>
+    <h1>V65 Binance Bot LIVE ✅</h1>
     <p>PAXG/USDT 1H - {t}</p>
-    <p>TOKEN: {token_set} | CHAT_ID: {chat_set}</p>
-    <p><a href="/ping">/ping - กันหลับ</a> | <a href="/test-telegram">/test-telegram</a> | <a href="/check">/check</a></p>
-    <p>Keep-Alive: ทุก 10 นาที + Bot Loop ทุก 60 นาที</p>
+    <p>TOKEN: {token_ok} | CHAT_ID: {chat_ok} ({TELEGRAM_CHAT_ID[:20]}...)</p>
+    <p><a href="/ping">/ping</a> | <a href="/test-telegram">/test-telegram - ทดสอบส่ง Telegram</a> | <a href="/check">/check - เช็คกราฟสด</a> | <a href="/force-send">/force-send - บังคับส่งตอนนี้</a></p>
+    <p>Bot Loop: ทุก 60 นาที | Keep-Alive: ทุก 10 นาที</p>
     """, 200
 
 @app.route("/ping")
@@ -78,18 +84,19 @@ def ping():
 @app.route("/test-telegram")
 def test_telegram():
     t = thai_now()
-    msg = f"V65 TEST 🟢 Telegram OK\n📅 {t}\nBot LIVE + กันหลับแล้ว ✅"
+    msg = f"V65 TEST 🟢 Telegram OK\n📅 {t}\nBot LIVE ✅"
     ok, resp = send_telegram(msg)
     if ok:
-        return f"<h1>✅ ส่งแล้ว</h1><p>{msg}</p>", 200
+        return f"<h1>✅ ส่ง Telegram แล้ว</h1><p>{msg}</p><p>Resp: {resp[:500]}</p>", 200
     else:
-        return f"<h1>❌ ส่งไม่สำเร็จ</h1><p>Error: {resp}</p>", 500
+        return f"<h1>❌ ส่งไม่สำเร็จ</h1><p>Error: {resp}</p><p>เช็ค TOKEN/CHAT_ID ใน Render Environment</p>", 500
 
+@app.route("/force-send")
 @app.route("/check")
 def check():
     try:
         msg = run_v65_once()
-        return f"<pre>{msg}</pre>", 200
+        return f"<h1>✅ ส่งแล้ว</h1><pre>{msg}</pre>", 200
     except Exception as e:
         import traceback
         return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
@@ -123,9 +130,9 @@ def run_v65_once():
     long_score = sum([ema_cross_up, macd_cross_up, above_200, rsi_v > 45])
     short_score = sum([ema_cross_down, macd_cross_down, below_200, rsi_v < 55])
     boll_info = f"BOLL {boll:.2f} UB {ub:.2f} LB {lb:.2f} EMA200 {ema200:.1f} ATR {atr_v:.2f}"
-    def h_buy(): return "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🟢🟢 <b>➡ SPOT ซื้อจ้า</b> 🟢🟢\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
-    def h_sell(): return "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n🔴🔴 <b>➡ SPOT ขายจ้า</b> 🔴🔴\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
-    def h_hold(): return "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n💎💎 <b>✊ ถือไว้/รอก่อน</b> 💎💎\n🟨🟨 <b>⏳ รอสัญญาณชัดๆ</b> 🟨🟨\n🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"
+    def h_buy(): return "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🟢🟢 ➡ SPOT ซื้อจ้า 🟢🟢\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
+    def h_sell(): return "🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n🔴🔴 ➡ SPOT ขายจ้า 🔴🔴\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
+    def h_hold(): return "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n💎💎 ✊ ถือไว้/รอก่อน 💎💎\n🟨🟨 ⏳ รอสัญญาณชัดๆ 🟨🟨\n🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦"
     t = thai_now()
     if long_score >= 3:
         info = h_buy() + f"\nLong {long_score}/4 RSI {rsi_v:.1f}"
@@ -141,28 +148,30 @@ def run_v65_once():
 
 def bot_loop():
     print("🚀 V65 Bot Loop Started")
-    time.sleep(15)
+    time.sleep(10)
     while True:
         try:
-            print(run_v65_once())
+            print(f"⏰ Loop {thai_now()}")
+            msg = run_v65_once()
+            print(msg)
         except Exception as e:
             print(f"Loop error: {e}")
+            import traceback
+            traceback.print_exc()
         time.sleep(3600)
 
 def keep_alive_loop():
-    print("🛡️ Keep-Alive Started - กันหลับทุก 10 นาที")
-    time.sleep(30)
+    print("🛡️ Keep-Alive Started")
+    time.sleep(20)
     while True:
         try:
-            # self ping
             r = requests.get(BASE_URL, timeout=10)
-            print(f"Keep-Alive self-ping: {r.status_code} {thai_now()}")
-            # ping /ping
+            print(f"Keep-Alive / : {r.status_code} {thai_now()}")
             r2 = requests.get(f"{BASE_URL}/ping", timeout=10)
             print(f"Keep-Alive /ping: {r2.status_code}")
         except Exception as e:
             print(f"Keep-Alive error: {e}")
-        time.sleep(600)  # 10 นาที
+        time.sleep(600)
 
 threading.Thread(target=bot_loop, daemon=True).start()
 threading.Thread(target=keep_alive_loop, daemon=True).start()
