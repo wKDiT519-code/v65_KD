@@ -9,6 +9,7 @@ import requests
 
 app = Flask(__name__)
 THAI_TZ = pytz.timezone('Asia/Bangkok')
+UTC_TZ = pytz.utc
 SYMBOL = "PAXG/USDT"
 TIMEFRAME = "1h"
 BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "https://v65-kd.onrender.com")
@@ -33,7 +34,16 @@ def send_telegram(msg):
     return ok_any, ""
 
 def thai_now():
-    return datetime.now(THAI_TZ).strftime("%d/%m/%Y %H:%M น. เวลาไทย")
+    # FIX: ใช้ utc เป็นฐานแล้วแปลงเป็นไทย จะเป๊ะกว่า datetime.now(THAI_TZ) บน Render
+    return datetime.now(UTC_TZ).astimezone(THAI_TZ).strftime("%d/%m/%Y %H:%M:%S น. เวลาไทย")
+
+def thai_from_ts(ts_ms):
+    # แปลง timestamp ของแท่งเทียนเป็นเวลาไทย
+    try:
+        dt_utc = datetime.fromtimestamp(ts_ms/1000, tz=UTC_TZ)
+        return dt_utc.astimezone(THAI_TZ).strftime("%d/%m %H:%M")
+    except:
+        return ""
 
 def ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
@@ -84,23 +94,23 @@ def detect_divergence(price_series, indicator_series, lookback=30):
 @app.route("/")
 def home():
     t = thai_now()
-    return f"<h1>V73 FIXED RANGE ✅</h1><p>{t}</p><p>แก้บั๊กช่วงขายสลับกัน</p><p><a href='/force-send'>/force-send</a></p>", 200
+    return f"<h1>V75 TIME FIXED ✅</h1><p>{t}</p><p>แก้เวลาให้ตรงเวลาไทยเป๊ะ + โชว์เวลาแท่งเทียน</p><p><a href='/force-send'>/force-send</a></p>", 200
 
 @app.route("/ping")
 def ping():
-    return f"PONG {thai_now()} - V73", 200
+    return f"PONG {thai_now()} - V75", 200
 
 @app.route("/force-send")
 @app.route("/check")
 def check():
     try:
-        msg = run_v73_once()
+        msg = run_v75_once()
         return f"<h1>OK ส่งแล้ว</h1><pre>{msg}</pre>", 200
     except Exception as e:
         import traceback
         return f"Error: {e}<br><pre>{traceback.format_exc()}</pre>", 500
 
-def run_v73_once():
+def run_v75_once():
     import ccxt
     import pandas as pd
     exchanges_to_try = ['okx', 'bybit', 'coinbase', 'kucoin', 'gateio', 'bitget']
@@ -130,6 +140,7 @@ def run_v73_once():
     last = df.iloc[-1]
     prev = df.iloc[-2]
     price = last['close']
+    last_ts = last['ts']
     ema12, ema26, ema200 = last['EMA_12'], last['EMA_26'], last['EMA_200']
     rsi_v = last['RSI']
     macd_dif, macd_dea = last['MACD'], last['MACD_S']
@@ -148,27 +159,29 @@ def run_v73_once():
     long_score = sum([ema_cross_up, macd_cross_up, above_200, rsi_v > 45, bullish_rsi_div, bullish_macd_div])
     short_score = sum([ema_cross_down, macd_cross_down, below_200, rsi_v < 55, bearish_rsi_div, bearish_macd_div])
 
-    t = thai_now()
+    t_now = thai_now()
+    t_candle = thai_from_ts(last_ts)
     trend = "ขาขึ้น" if price > ema200 else "ขาลง"
 
-    # FIXED RANGE LOGIC - ไม่มีสลับ
     if long_score >= 4:
         buy_low = min(ema200 - atr_v*0.5, price - atr_v)
         buy_high = price
         buy_ideal = min(ema12, price*0.998) if ema12 < price else price*0.998
         sell_target = price + atr_v*2
+        upside_pct = (sell_target - price) / price * 100
 
         title = "🟢 ซื้อ"
         msg = (
-            f"V73 [{SYMBOL}] {title}\n"
-            f"📅 {t}\n"
-            f"💰 ตอนนี้ ${price:.2f} | {used_ex} | RSI {rsi_v:.0f}\n"
+            f"V75 [{SYMBOL}] {title}\n"
+            f"📅 ส่ง {t_now}\n"
+            f"🕐 แท่ง {t_candle} | {used_ex}\n"
+            f"💰 ตอนนี้ ${price:.2f} | RSI {rsi_v:.0f}\n"
             f"\n"
             f"🎯 ควรซื้อที่\n"
             f"${buy_low:.2f} - ${buy_high:.2f}\n"
             f"เป้าเข้า ${buy_ideal:.2f} (EMA12)\n"
             f"\n"
-            f"📈 ถือไปขาย ${sell_target:.2f} | {trend}\n"
+            f"📈 ถือไปขาย ${sell_target:.2f} (+{upside_pct:.2f}%) | {trend}\n"
             f"--------------------------------"
         )
     elif short_score >= 4:
@@ -176,49 +189,61 @@ def run_v73_once():
         sell_high = price + atr_v*1.5
         sell_ideal = price
         buy_back = ema200
+        downside_pct = (price - buy_back) / price * 100
 
         title = "🔴 ขาย"
         msg = (
-            f"V73 [{SYMBOL}] {title}\n"
-            f"📅 {t}\n"
-            f"💰 ตอนนี้ ${price:.2f} | {used_ex} | RSI {rsi_v:.0f}\n"
+            f"V75 [{SYMBOL}] {title}\n"
+            f"📅 ส่ง {t_now}\n"
+            f"🕐 แท่ง {t_candle} | {used_ex}\n"
+            f"💰 ตอนนี้ ${price:.2f} | RSI {rsi_v:.0f}\n"
             f"\n"
             f"🎯 ควรขายที่\n"
             f"${sell_low:.2f} - ${sell_high:.2f}\n"
             f"เป้าขาย ${sell_ideal:.2f} ตอนนี้เลย\n"
             f"\n"
-            f"📉 รอย่อซื้อใหม่ ${buy_back:.2f} (EMA200)\n"
+            f"📉 รอย่อซื้อใหม่ ${buy_back:.2f} (-{downside_pct:.2f}%)\n"
             f"--------------------------------"
         )
     else:
-        # ถือไว้ - FIXED ไม่ให้สลับ
         buy_low = ema200 - atr_v*0.5
         buy_high = min(ema12, price*0.995)
         if buy_low > buy_high:
             buy_low, buy_high = buy_high, buy_low
-        # ให้ buy ต่ำกว่าราคาปัจจุบันเสมอ
         buy_high = min(buy_high, price*0.995)
         buy_low = min(buy_low, buy_high - 1)
 
         sell_low = max(price*1.005, ema12)
         sell_high = sell_low + atr_v*1.5
-        # ให้ขายสูงกว่าราคาปัจจุบันเสมอ
 
+        dist_to_buy = (price - buy_high) / price * 100
+        dist_to_sell = (sell_low - price) / price * 100
+        
         trend_msg = f"ยัง {trend} ถ้ามีของถือต่อ" if price > ema200 else "รอดูก่อน"
+
+        if dist_to_sell > dist_to_buy * 1.5:
+            insight = f"💡 ไปขาย +{dist_to_sell:.2f}% ไกลกว่า ลงไปซื้อ -{dist_to_buy:.2f}%\n   → ยังมี Upside น่าถือ/ซื้อได้"
+        elif dist_to_buy > dist_to_sell * 1.5:
+            insight = f"💡 ลงไปซื้อ -{dist_to_buy:.2f}% ไกลกว่า ไปขาย +{dist_to_sell:.2f}%\n   → ใกล้แนวขายแล้ว ระวัง"
+        else:
+            insight = f"💡 ระยะพอๆกัน ซื้อ -{dist_to_buy:.2f}% / ขาย +{dist_to_sell:.2f}%"
 
         title = "💎 ถือไว้"
         msg = (
-            f"V73 [{SYMBOL}] {title}\n"
-            f"📅 {t}\n"
-            f"💰 ตอนนี้ ${price:.2f} | {used_ex} | RSI {rsi_v:.0f}\n"
+            f"V75 [{SYMBOL}] {title}\n"
+            f"📅 ส่ง {t_now}\n"
+            f"🕐 แท่ง {t_candle} | {used_ex}\n"
+            f"💰 ตอนนี้ ${price:.2f} | RSI {rsi_v:.0f}\n"
             f"\n"
             f"{trend_msg}\n"
             f"\n"
             f"🎯 ถ้าจะซื้อ รอถูกกว่านี้\n"
-            f"${buy_low:.2f} - ${buy_high:.2f} (EMA200-EMA12)\n"
+            f"${buy_low:.2f} - ${buy_high:.2f} (ลงอีก {dist_to_buy:.2f}%)\n"
             f"\n"
             f"🎯 ถ้าจะขาย รอแพงกว่านี้\n"
-            f"${sell_low:.2f} - ${sell_high:.2f}\n"
+            f"${sell_low:.2f} - ${sell_high:.2f} (ขึ้นอีก {dist_to_sell:.2f}%)\n"
+            f"\n"
+            f"{insight}\n"
             f"--------------------------------"
         )
 
@@ -229,7 +254,7 @@ def bot_loop():
     time.sleep(10)
     while True:
         try:
-            run_v73_once()
+            run_v75_once()
         except:
             pass
         time.sleep(3600)
